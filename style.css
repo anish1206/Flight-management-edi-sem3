@@ -138,6 +138,10 @@ st.markdown("""
         transform: translateY(-2px);
     }
     
+    .stButton>button:active {
+        transform: translateY(0px);
+    }
+    
     /* Data Tables */
     [data-testid="stDataFrame"] {
         background: rgba(21, 27, 53, 0.6);
@@ -170,11 +174,11 @@ st.markdown("""
     }
     
     /* Input Fields */
-    .stSelectbox, .stMultiSelect, .stRadio, .stSlider {
+    .stSelectbox, .stMultiSelect, .stRadio {
         font-family: 'Rajdhani', sans-serif;
     }
     
-    .stSelectbox label, .stMultiSelect label, .stRadio label, .stSlider label {
+    .stSelectbox label, .stMultiSelect label, .stRadio label {
         color: #8b95a5 !important;
         font-weight: 600 !important;
         text-transform: uppercase;
@@ -188,6 +192,26 @@ st.markdown("""
         border: 1px solid rgba(0, 212, 255, 0.3) !important;
         border-radius: 6px !important;
         font-family: 'Roboto Mono', monospace !important;
+    }
+    
+    input:focus, select:focus, textarea:focus {
+        border-color: #00d4ff !important;
+        box-shadow: 0 0 0 1px #00d4ff !important;
+    }
+    
+    /* Info/Success/Warning/Error boxes */
+    .stAlert {
+        background: rgba(21, 27, 53, 0.8);
+        border-left: 4px solid;
+        border-radius: 8px;
+        padding: 1rem;
+        font-family: 'Rajdhani', sans-serif;
+        backdrop-filter: blur(10px);
+    }
+    
+    [data-baseweb="notification"] {
+        background: rgba(21, 27, 53, 0.95) !important;
+        border-left: 4px solid #00d4ff !important;
     }
     
     /* Status indicators */
@@ -226,6 +250,25 @@ st.markdown("""
         font-family: 'Roboto Mono', monospace;
     }
     
+    pre {
+        background: rgba(21, 27, 53, 0.8) !important;
+        border: 1px solid rgba(0, 212, 255, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+    }
+    
+    /* Expander */
+    [data-testid="stExpander"] {
+        background: rgba(21, 27, 53, 0.6);
+        border: 1px solid rgba(0, 212, 255, 0.2);
+        border-radius: 8px;
+    }
+    
+    /* Plotly charts background */
+    .js-plotly-plot {
+        background: transparent !important;
+    }
+    
     /* Scrollbar */
     ::-webkit-scrollbar {
         width: 10px;
@@ -241,15 +284,30 @@ st.markdown("""
         border-radius: 5px;
     }
     
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, #00ff88, #00cc6a);
+    }
+    
+    /* Spinner */
+    .stSpinner > div {
+        border-top-color: #00d4ff !important;
+    }
+    
     /* Text colors */
     p, span, div {
         color: #c5d0de !important;
     }
     
+    /* Link styling */
     a {
         color: #00d4ff !important;
         text-decoration: none;
         font-weight: 600;
+    }
+    
+    a:hover {
+        color: #00ff88 !important;
+        text-decoration: underline;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -294,32 +352,6 @@ def load_cmapss_data(file_path):
         st.error(f"❌ ERROR LOADING DATA FILE: {str(e)}")
         return None
 
-def prepare_sequence_data(df_engine, feature_columns, scaler, sequence_length=30):
-    """
-    Prepare sequence data for LSTM prediction
-    Uses the last 'sequence_length' cycles of the engine data
-    """
-    # Get the data
-    engine_data = df_engine[feature_columns].values
-    
-    # If we have fewer cycles than sequence_length, pad with the first reading
-    if len(engine_data) < sequence_length:
-        padding_needed = sequence_length - len(engine_data)
-        first_reading = engine_data[0:1]
-        padding = np.repeat(first_reading, padding_needed, axis=0)
-        engine_data = np.vstack([padding, engine_data])
-    
-    # Take the last 'sequence_length' cycles
-    engine_data = engine_data[-sequence_length:]
-    
-    # Scale the data
-    engine_data_scaled = scaler.transform(engine_data)
-    
-    # Reshape for LSTM (1 sample, sequence_length timesteps, n_features)
-    engine_data_reshaped = engine_data_scaled.reshape(1, sequence_length, -1)
-    
-    return engine_data_reshaped
-
 # Header
 st.markdown("# ✈️ TURBOFAN ENGINE RUL PREDICTOR")
 st.markdown("### PREDICTIVE MAINTENANCE SYSTEM // NASA C-MAPSS DATASET")
@@ -337,15 +369,9 @@ model, scaler = load_lstm_model()
 
 if data_source == "🔬 TEST DATA (FD001)":
     test_file = Path("data/test_FD001.txt")
-    rul_file = Path("data/RUL_FD001.txt")
     
     if test_file.exists():
         df_test = load_cmapss_data(test_file)
-        
-        # Load true RUL values if available
-        true_rul_values = None
-        if rul_file.exists():
-            true_rul_values = pd.read_csv(rul_file, sep='\s+', header=None, names=['true_rul'])
         
         if df_test is not None:
             engine_ids = sorted(df_test['unit_id'].unique())
@@ -355,16 +381,6 @@ if data_source == "🔬 TEST DATA (FD001)":
                 "🎯 TARGET ENGINE ID:",
                 engine_ids,
                 index=0
-            )
-            
-            # Sequence length parameter
-            st.sidebar.markdown("---")
-            sequence_length = st.sidebar.slider(
-                "SEQUENCE LENGTH (TIME STEPS):",
-                min_value=10,
-                max_value=50,
-                value=30,
-                help="Number of recent cycles to use for prediction"
             )
             
             df_engine = df_test[df_test['unit_id'] == selected_engine].copy()
@@ -378,11 +394,7 @@ if data_source == "🔬 TEST DATA (FD001)":
             with col2:
                 st.metric("SENSOR ARRAY", len(SENSOR_COLUMNS))
             with col3:
-                if true_rul_values is not None:
-                    true_rul = true_rul_values.iloc[selected_engine - 1]['true_rul']
-                    st.metric("TRUE RUL", f"{true_rul} cycles")
-                else:
-                    st.metric("OPERATIONAL SETTINGS", len(SETTING_COLUMNS))
+                st.metric("OPERATIONAL SETTINGS", len(SETTING_COLUMNS))
             
             st.markdown("---")
             
@@ -425,36 +437,24 @@ if data_source == "🔬 TEST DATA (FD001)":
             if model and scaler and st.button("🔮 EXECUTE RUL PREDICTION", type="primary"):
                 with st.spinner('⚙️ PROCESSING NEURAL NETWORK INFERENCE...'):
                     try:
-                        # Determine feature columns based on scaler
+                        feature_columns = SETTING_COLUMNS + SENSOR_COLUMNS
+                        engine_data = df_engine[feature_columns].values
+                        
                         expected_features = scaler.n_features_in_
+                        actual_features = engine_data.shape[1]
                         
-                        # Try different feature combinations
-                        if expected_features == 18:
-                            # Just sensors (likely first 18 sensors or selected sensors)
-                            feature_columns = SENSOR_COLUMNS[:18]
-                            st.info(f"⚙️ USING {expected_features} SENSOR FEATURES")
-                        elif expected_features == 24:
-                            # Settings + all sensors
-                            feature_columns = SETTING_COLUMNS + SENSOR_COLUMNS
-                            st.info(f"⚙️ USING SETTINGS + SENSORS ({expected_features} FEATURES)")
-                        elif expected_features == 21:
-                            # All 21 sensors
-                            feature_columns = SENSOR_COLUMNS
-                            st.info(f"⚙️ USING ALL {expected_features} SENSORS")
-                        else:
-                            # Default: use whatever fits
-                            feature_columns = (SETTING_COLUMNS + SENSOR_COLUMNS)[:expected_features]
-                            st.warning(f"⚠️ USING FIRST {expected_features} FEATURES")
+                        if actual_features != expected_features:
+                            if expected_features == 18:
+                                feature_columns = SENSOR_COLUMNS[:18]
+                                engine_data = df_engine[feature_columns].values
+                                st.info(f"⚙️ USING {expected_features} SENSOR FEATURES FOR INFERENCE")
                         
-                        # Prepare sequence data using windowing approach
-                        engine_data_reshaped = prepare_sequence_data(
-                            df_engine, 
-                            feature_columns, 
-                            scaler, 
-                            sequence_length
+                        engine_data_scaled = scaler.transform(engine_data)
+                        engine_data_reshaped = np.reshape(
+                            engine_data_scaled,
+                            (1, engine_data_scaled.shape[0], engine_data_scaled.shape[1])
                         )
                         
-                        # Make prediction
                         prediction = model.predict(engine_data_reshaped, verbose=0)
                         predicted_rul = int(prediction[0][0])
                         predicted_rul = max(0, predicted_rul)
@@ -467,14 +467,6 @@ if data_source == "🔬 TEST DATA (FD001)":
                         with col1:
                             st.metric("PREDICTED RUL", f"{predicted_rul} CYCLES")
                             
-                            # Show true RUL if available
-                            if true_rul_values is not None:
-                                true_rul = true_rul_values.iloc[selected_engine - 1]['true_rul']
-                                st.metric("TRUE RUL", f"{true_rul} CYCLES")
-                                error = abs(predicted_rul - true_rul)
-                                st.metric("PREDICTION ERROR", f"{error} CYCLES")
-                            
-                            # Status indicator
                             if predicted_rul > 120:
                                 status = "🟢 OPERATIONAL"
                                 status_class = "status-healthy"
@@ -619,6 +611,6 @@ st.markdown("""
 **APPLICATION:** Turbofan Engine Remaining Useful Life Prediction System  
 **DATASET:** NASA C-MAPSS (Commercial Modular Aero-Propulsion System Simulation)  
 **MODEL ARCHITECTURE:** Long Short-Term Memory (LSTM) Neural Network  
-**INPUT METHOD:** Sliding Window Sequence (Last N Cycles)  
+**INPUT PARAMETERS:** 18-24 Sensor Readings + Operational Cycles  
 **PREDICTION OUTPUT:** Remaining Useful Life (RUL) in Cycles
 """)
